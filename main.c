@@ -1,25 +1,17 @@
-fast pwm mode 14
-
 #define F_CPU 16000000UL
 
 // 왼쪽 모터
-#define MOTOR_LEFT_IN1  PB0
-#define MOTOR_LEFT_IN2  PB1
-#define MOTOR_LEFT_EN   PE3  // PWM 출력 (OC1A)
+#define MOTOR_LEFT_IN1  PB0 // IN1 (정방향)
+#define MOTOR_LEFT_IN2  PB1 // IN2 (역방향)
+#define MOTOR_LEFT_EN   PE3  // 출력 (OC1A)
 
 // 오른쪽 모터
-#define MOTOR_RIGHT_IN1 PB2
-#define MOTOR_RIGHT_IN2 PB3
-#define MOTOR_RIGHT_EN  PE4  // PWM 출력 (OC1B)
+#define MOTOR_RIGHT_IN1 PB2 // IN3 (정방향)
+#define MOTOR_RIGHT_IN2 PB3 // IN4 (역방향)
+#define MOTOR_RIGHT_EN  PE4  // 출력 (OC1B)
 
-// PWM 설정 (Mode 14: ICR1을 TOP으로)
-#define PWM_TOP_VALUE 799    // 약 20kHz 주파수
-#define HIGH_SPEED_RATIO 0.8 // 80% Duty Cycle
-#define LOW_SPEED_RATIO  0.5 // 50% Duty Cycle
-
-// OCR 값으로 변환하여 사용 (기존 main 로직과의 호환성을 위해 이름 유지)
-#define high_speed (unsigned short)(PWM_TOP_VALUE * HIGH_SPEED_RATIO)
-#define low_speed  (unsigned short)(PWM_TOP_VALUE * LOW_SPEED_RATIO)
+#define high_speed 500
+#define low_speed  300 // 799
 
 #define BAUD 9600
 #define MYUBRR (F_CPU/16/BAUD-1)
@@ -27,7 +19,8 @@ fast pwm mode 14
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
-#include <stdio.h> // atoi() 사용을 위해
+#include <stdio.h>
+#include <stdlib.h> // atoi() 사용을 위해
 
 // 전역 변수 (UART 수신 데이터)
 int x=0, y=0, w=0, h=0;
@@ -40,20 +33,51 @@ int buf_index = 0;
 #define cam_center (cam_w/2)
 
 #define error_range 50
-#define stop_w 500
+#define stop_w 500 // 640 
 #define near_w 400
-
 
 // 함수 선언
 void timer_init(void);
 void motor_init(void);
+void uart_init(void);
+void parse_data(char* str);
 void motor_forward(int speed);
 void motor_backward(int speed);
 void motor_left(int speed);
 void motor_right(int speed);
 void motor_stop(void);
-void uart_init(void);
-void parse_data(char* str);
+
+// Timer1 Fast PWM Mode 14 (ICR1 TOP) 설정
+void timer_init(void)
+{
+	// Mode 14: Fast PWM, TOP=ICR1, 비반전 출력 (COM1A1, COM1B1)
+	TCCR1A = (1<<COM1A1) | (1<<COM1B1) | (1<<WGM11);
+	TCCR1B = (1<<WGM12) | (1<<WGM13) | (1<<CS10); // 분주비 1
+	
+	ICR1 = 799; // TOP 값 설정
+	OCR1A = 0;
+	OCR1B = 0;
+}
+
+void motor_init()
+{
+	// IN 핀 출력: PB0, PB1, PB2, PB3 (DDRB 설정)
+	DDRB |= (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2);
+	
+	// EN 핀 PWM 출력: PE3(OC1A), PE4(OC1B) (DDRE 설정)
+	// OC1A는 PE3, OC1B는 PE4에 연결됨.
+	DDRE |= (1<<MOTOR_LEFT_EN) | (1<<MOTOR_RIGHT_EN);
+
+	motor_stop();
+}
+
+void uart_init()
+{
+	UBRR0H = (unsigned char)(MYUBRR>>8);
+	UBRR0L = (unsigned char)MYUBRR;
+	UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0); // RX interrupt enable
+	UCSR0C = (1<<UCSZ01) | (1<<UCSZ00); // 8N1
+}
 
 
 void parse_data(char* str)
@@ -78,36 +102,6 @@ void parse_data(char* str)
 	}
 }
 
-// Timer1 Fast PWM Mode 14 (ICR1 TOP) 설정
-void timer_init(void)
-{
-	// Mode 14: Fast PWM, TOP=ICR1, 비반전 출력 (COM1A1, COM1B1)
-	TCCR1A = (1<<COM1A1) | (1<<COM1B1) | (1<<WGM11);
-	TCCR1B = (1<<WGM12) | (1<<WGM13) | (1<<CS10); // 분주비 1
-	
-	ICR1 = PWM_TOP_VALUE; // TOP 값 설정
-	OCR1A = 0;
-	OCR1B = 0;
-}
-
-void motor_init()
-{
-	// IN 핀 출력: PB0, PB1, PB2, PB3 (DDRB 설정)
-	DDRB |= (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2);
-	
-	// EN 핀 PWM 출력: PE3(OC1A), PE4(OC1B) (DDRE 설정) <-- 수정된 부분
-	DDRE |= (1<<MOTOR_LEFT_EN) | (1<<MOTOR_RIGHT_EN);
-
-	motor_stop();
-}
-
-void uart_init()
-{
-	UBRR0H = (unsigned char)(MYUBRR>>8);
-	UBRR0L = (unsigned char)MYUBRR;
-	UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0); // RX interrupt enable
-	UCSR0C = (1<<UCSZ01) | (1<<UCSZ00); // 8N1
-}
 
 ISR(USART_RX_vect)
 {
@@ -126,9 +120,10 @@ ISR(USART_RX_vect)
 	}
 }
 
-// 모터 제어 함수 (Mode 14와 호환되도록 speed는 OCR 값으로 사용)
+// 모터 제어 함수 
 void motor_forward(int speed)
 {
+	// 왼쪽: IN1(정방향)=1, IN2(역방향)=0 | 오른쪽: IN1(정방향)=1, IN2(역방향)=0
 	PORTB |=  (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_RIGHT_IN1);
 	PORTB &= ~((1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN2));
 	OCR1A = speed;
@@ -137,39 +132,44 @@ void motor_forward(int speed)
 
 void motor_backward(int speed)
 {
+	// 왼쪽: IN1(정방향)=0, IN2(역방향)=1 | 오른쪽: IN1(정방향)=0, IN2(역방향)=1
 	PORTB |=  (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN2);
 	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_RIGHT_IN1));
 	OCR1A = speed;
 	OCR1B = speed;
 }
 
+// 좌회전 (왼쪽 정지, 오른쪽 전진) // 왼쪽 정지로 할까 느린 전진으로 할까 고민중. 
 void motor_left(int speed)
 {
-	// 왼쪽 모터 정지
+	// 왼쪽 모터 정지: IN1=0, IN2=0
 	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2));
-	OCR1A = 0;
+	OCR1A = 0; // 왼쪽 PWM 정지
 
-	// 오른쪽 모터 전진
+	// 오른쪽 모터 전진: IN1=1, IN2=0
 	PORTB |= (1<<MOTOR_RIGHT_IN1);
 	PORTB &= ~(1<<MOTOR_RIGHT_IN2);
-	OCR1B = speed;
+	OCR1B = speed; // 오른쪽 PWM 전진
 }
 
+// 우회전 (오른쪽 정지, 왼쪽 전진)
 void motor_right(int speed)
 {
-	// 오른쪽 모터 정지
+	// 오른쪽 모터 정지: IN1=0, IN2=0
 	PORTB &= ~((1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2));
-	OCR1B = 0;
+	OCR1B = 0; // 오른쪽 PWM 정지
 
-	// 왼쪽 모터 전진
+	// 왼쪽 모터 전진: IN1=1, IN2=0
 	PORTB |= (1<<MOTOR_LEFT_IN1);
 	PORTB &= ~(1<<MOTOR_LEFT_IN2);
-	OCR1A = speed;
+	OCR1A = speed; // 왼쪽 PWM 전진
 }
 
 void motor_stop()
 {
+	// 모든 IN 핀 0
 	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2));
+	// 모든 PWM 0
 	OCR1A = 0;
 	OCR1B = 0;
 }
@@ -182,7 +182,7 @@ int main(void)
 	sei(); // 전역 인터럽트 활성화
 
 	while(1)
-	{
+	{	
 		// 파싱된 x, w 값을 사용하여 객체 중심 위치 계산
 		int obj_center = x + w/2;
 
@@ -195,8 +195,10 @@ int main(void)
 		{
 			if(obj_center > cam_center + error_range) // 오른쪽으로 치우쳐져 있을 때
 			motor_right(low_speed);
+			
 			else if(obj_center < cam_center - error_range) // 왼쪽으로 치우쳐져 있을 때
 			motor_left(low_speed);
+			
 			else // 중앙일 때
 			motor_forward(low_speed);
 		}
@@ -205,8 +207,10 @@ int main(void)
 		{
 			if(obj_center > cam_center + error_range)
 			motor_right(high_speed);
+			
 			else if(obj_center < cam_center - error_range)
 			motor_left(high_speed);
+			
 			else
 			motor_forward(high_speed);
 		}
