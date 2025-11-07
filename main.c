@@ -1,95 +1,102 @@
 #define F_CPU 16000000UL
 
-// ì™¼ìª½ ëª¨í„°
-#define MOTOR_LEFT_IN1  PB0 // IN1 (ì •ë°©í–¥)
-#define MOTOR_LEFT_IN2  PB1 // IN2 (ì—­ë°©í–¥)
-#define MOTOR_LEFT_EN   PE3  // ì¶œë ¥ (OC1A)
+// ¿ŞÂÊ ¸ğÅÍ (ENA/B5, IN1/E0, IN2/E1)
+#define MOTOR_LEFT_EN   PB5  // OCR1A
+#define MOTOR_LEFT_IN1  PE0
+#define MOTOR_LEFT_IN2  PE1
 
-// ì˜¤ë¥¸ìª½ ëª¨í„°
-#define MOTOR_RIGHT_IN1 PB2 // IN3 (ì •ë°©í–¥)
-#define MOTOR_RIGHT_IN2 PB3 // IN4 (ì—­ë°©í–¥)
-#define MOTOR_RIGHT_EN  PE4  // ì¶œë ¥ (OC1B)
+// ¿À¸¥ÂÊ ¸ğÅÍ (ENB/B6, IN3/E2, IN4/E3)
+#define MOTOR_RIGHT_EN  PB6  // OCR1B
+#define MOTOR_RIGHT_IN3 PE2  // IN3 (Á¤¹æÇâ)
+#define MOTOR_RIGHT_IN4 PE3  // IN4 (¿ª¹æÇâ)
 
 #define high_speed 500
 #define low_speed  300 // 799
-
-#define BAUD 9600
-#define MYUBRR (F_CPU/16/BAUD-1)
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <stdio.h>
-#include <stdlib.h> // atoi() ì‚¬ìš©ì„ ìœ„í•´
+#include <stdlib.h> // atoi() »ç¿ëÀ» À§ÇØ
 
-// ì „ì—­ ë³€ìˆ˜ (UART ìˆ˜ì‹  ë°ì´í„°)
-int x=0, y=0, w=0, h=0;
+// [¼öÁ¤ 1] ISR°ú °øÀ¯ÇÏ´Â Àü¿ª º¯¼ö¿¡ volatile Å°¿öµå Ãß°¡
+volatile int x=0, y=0, w=0, h=0;
 char uart_buf[32];
-int buf_index = 0;
+volatile int buf_index = 0; // ISR¿¡¼­ ¼öÁ¤µÇ¹Ç·Î volatile Ãß°¡
 
-// ì¶”ì  ë¡œì§ ìƒìˆ˜
+// ÃßÀû ·ÎÁ÷ »ó¼ö
 #define cam_w 640
 #define cam_h 480
 #define cam_center (cam_w/2)
 
 #define error_range 50
-#define stop_w 500 // 640 
+#define stop_w 500 // 640
 #define near_w 400
 
-// í•¨ìˆ˜ ì„ ì–¸
+// ÇÔ¼ö ¼±¾ğ
 void timer_init(void);
 void motor_init(void);
 void uart_init(void);
 void parse_data(char* str);
 void motor_forward(int speed);
 void motor_backward(int speed);
-void motor_left(int speed);
-void motor_right(int speed);
+void motor_left_turn(int speed);
+void motor_right_turn(int speed);
 void motor_stop(void);
 
-// Timer1 Fast PWM Mode 14 (ICR1 TOP) ì„¤ì •
+// Timer1 Fast PWM Mode 14 (ICR1 TOP) ¼³Á¤
 void timer_init(void)
 {
-	// Mode 14: Fast PWM, TOP=ICR1, ë¹„ë°˜ì „ ì¶œë ¥ (COM1A1, COM1B1)
+	// Mode 14: Fast PWM, TOP=ICR1, ºñ¹İÀü Ãâ·Â (COM1A1, COM1B1)
 	TCCR1A = (1<<COM1A1) | (1<<COM1B1) | (1<<WGM11);
-	TCCR1B = (1<<WGM12) | (1<<WGM13) | (1<<CS10); // ë¶„ì£¼ë¹„ 1
+	TCCR1B = (1<<WGM12) | (1<<WGM13) | (1<<CS10); // ºĞÁÖºñ 1
 	
-	ICR1 = 799; // TOP ê°’ ì„¤ì •
+	ICR1 = 799; // TOP °ª ¼³Á¤
 	OCR1A = 0;
 	OCR1B = 0;
 }
 
 void motor_init()
 {
-	// IN í•€ ì¶œë ¥: PB0, PB1, PB2, PB3 (DDRB ì„¤ì •)
-	DDRB |= (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2);
+	// IN ÇÉ Ãâ·Â: PE0, PE1, PE2, PE3 (DDRE ¼³Á¤)
+	DDRE |= (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN3) | (1<<MOTOR_RIGHT_IN4);
 	
-	// EN í•€ PWM ì¶œë ¥: PE3(OC1A), PE4(OC1B) (DDRE ì„¤ì •)
-	// OC1AëŠ” PE3, OC1BëŠ” PE4ì— ì—°ê²°ë¨.
-	DDRE |= (1<<MOTOR_LEFT_EN) | (1<<MOTOR_RIGHT_EN);
+	// EN ÇÉ PWM Ãâ·Â: PB5(OC1A), PB6(OC1B) (DDRB ¼³Á¤)
+	DDRB |= (1<<MOTOR_LEFT_EN) | (1<<MOTOR_RIGHT_EN);
 
 	motor_stop();
 }
 
+// [¼öÁ¤] UART ÇÉ (PD2=RXD1, PD3=TXD1)
 void uart_init()
 {
-	UBRR0H = (unsigned char)(MYUBRR>>8);
-	UBRR0L = (unsigned char)MYUBRR;
-	UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0); // RX interrupt enable
-	UCSR0C = (1<<UCSZ01) | (1<<UCSZ00); // 8N1
+	// USART1À» »ç¿ëÇÏµµ·Ï ¸ğµç ·¹Áö½ºÅÍ º¯°æ (UCSR0->UCSR1 µî)
+	UCSR1A = 0x00;
+	UCSR1B = (1<<RXEN1) | (1<<TXEN1) | (1<<RXCIE1); //enable
+	UCSR1C = (1<<UCSZ11) | (1<<UCSZ10); // 8bit
+	UBRR1H = 0;
+	UBRR1L = 103; //9600
 }
 
 
 void parse_data(char* str)
 {
-	int *values[] = {&x, &y, &w, &h};
+	// 'volatile' °æ°í ÇØ°á
+	volatile int *values[] = {&x, &y, &w, &h};
 	int val_index = 0;
 	char *token_start = str;
 
-	for (int i = 0; str[i] != '\0'; i++)
+	// 0,0,0,0 ¼ö½Å ´ëºñ
+	if (str[0] == '\0') {
+		x = 0; y = 0; w = 0; h = 0;
+		return;
+	}
+
+	for (int i = 0; ; i++)
 	{
-		if (str[i] == ',' || str[i] == '\n')
+		if (str[i] == ',' || str[i] == '\0' || str[i] == '\n')
 		{
+			char temp_char = str[i];
 			str[i] = '\0';
 			
 			if (val_index < 4) {
@@ -98,78 +105,80 @@ void parse_data(char* str)
 
 			token_start = &str[i+1];
 			val_index++;
+
+			if (temp_char == '\0' || temp_char == '\n' || val_index >= 4) {
+				break;
+			}
 		}
 	}
 }
 
 
-ISR(USART_RX_vect)
+// [¼öÁ¤] ISR º¤ÅÍ ÀÌ¸§À» USART1·Î º¯°æ, UDR1 »ç¿ë
+ISR(USART1_RX_vect)
 {
-	char c = UDR0;
+	char c = UDR1; // UDR0 -> UDR1
+	int current_buf_index = buf_index; // volatile º¯¼ö´Â Áö¿ª º¯¼ö·Î º¹»çÇØ¼­ »ç¿ë
 
 	if(c == '\n')
 	{
-		uart_buf[buf_index] = 0; // ë¬¸ìì—´ ì¢…ë£Œ
+		uart_buf[current_buf_index] = 0; // ¹®ÀÚ¿­ Á¾·á
 		parse_data(uart_buf);
-		buf_index = 0;
+		buf_index = 0; // ÀÎµ¦½º ¸®¼Â
 	}
 	else
 	{
-		uart_buf[buf_index++] = c;
-		if(buf_index >= 31) buf_index = 31;
+		if(current_buf_index < 31) // ¹öÆÛ ¿À¹öÇÃ·Î¿ì ¹æÁö
+		{
+			uart_buf[current_buf_index] = c;
+			buf_index = current_buf_index + 1; // volatile º¯¼ö °»½Å
+		}
+		else {
+			buf_index = 0;  // ¹öÆÛ ¸®¼Â
+		}
 	}
 }
 
-// ëª¨í„° ì œì–´ í•¨ìˆ˜ 
+// ¸ğÅÍ Á¦¾î ÇÔ¼ö (PORTE »ç¿ë)
 void motor_forward(int speed)
 {
-	// ì™¼ìª½: IN1(ì •ë°©í–¥)=1, IN2(ì—­ë°©í–¥)=0 | ì˜¤ë¥¸ìª½: IN1(ì •ë°©í–¥)=1, IN2(ì—­ë°©í–¥)=0
-	PORTB |=  (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_RIGHT_IN1);
-	PORTB &= ~((1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN2));
+	// ¿ŞÂÊ: IN1(E0)=1, IN2(E1)=0 | ¿À¸¥ÂÊ: IN3(E2)=1, IN4(E3)=0
+	PORTE = (1<<MOTOR_LEFT_IN1) | (1<<MOTOR_RIGHT_IN3);
 	OCR1A = speed;
 	OCR1B = speed;
 }
 
 void motor_backward(int speed)
 {
-	// ì™¼ìª½: IN1(ì •ë°©í–¥)=0, IN2(ì—­ë°©í–¥)=1 | ì˜¤ë¥¸ìª½: IN1(ì •ë°©í–¥)=0, IN2(ì—­ë°©í–¥)=1
-	PORTB |=  (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN2);
-	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_RIGHT_IN1));
+	// ¿ŞÂÊ: IN1(E0)=0, IN2(E1)=1 | ¿À¸¥ÂÊ: IN3(E2)=0, IN4(E3)=1
+	PORTE = (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN4);
 	OCR1A = speed;
 	OCR1B = speed;
 }
 
-// ì¢ŒíšŒì „ (ì™¼ìª½ ì •ì§€, ì˜¤ë¥¸ìª½ ì „ì§„) // ì™¼ìª½ ì •ì§€ë¡œ í• ê¹Œ ëŠë¦° ì „ì§„ìœ¼ë¡œ í• ê¹Œ ê³ ë¯¼ì¤‘. 
-void motor_left(int speed)
+// ÁÂÈ¸Àü (¿ŞÂÊ Á¤Áö, ¿À¸¥ÂÊ ÀüÁø)
+void motor_left_turn(int speed)
 {
-	// ì™¼ìª½ ëª¨í„° ì •ì§€: IN1=0, IN2=0
-	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2));
-	OCR1A = 0; // ì™¼ìª½ PWM ì •ì§€
-
-	// ì˜¤ë¥¸ìª½ ëª¨í„° ì „ì§„: IN1=1, IN2=0
-	PORTB |= (1<<MOTOR_RIGHT_IN1);
-	PORTB &= ~(1<<MOTOR_RIGHT_IN2);
-	OCR1B = speed; // ì˜¤ë¥¸ìª½ PWM ì „ì§„
+	// ¿ŞÂÊ: Á¤Áö | ¿À¸¥ÂÊ: IN3(E2)=1
+	PORTE = (1<<MOTOR_RIGHT_IN3);
+	OCR1A = 0;     // ¿ŞÂÊ PWM (Á¤Áö)
+	OCR1B = speed; // ¿À¸¥ÂÊ PWM (ÀüÁø)
 }
 
-// ìš°íšŒì „ (ì˜¤ë¥¸ìª½ ì •ì§€, ì™¼ìª½ ì „ì§„)
-void motor_right(int speed)
+// ¿ìÈ¸Àü (¿À¸¥ÂÊ Á¤Áö, ¿ŞÂÊ ÀüÁø)
+void motor_right_turn(int speed)
 {
-	// ì˜¤ë¥¸ìª½ ëª¨í„° ì •ì§€: IN1=0, IN2=0
-	PORTB &= ~((1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2));
-	OCR1B = 0; // ì˜¤ë¥¸ìª½ PWM ì •ì§€
-
-	// ì™¼ìª½ ëª¨í„° ì „ì§„: IN1=1, IN2=0
-	PORTB |= (1<<MOTOR_LEFT_IN1);
-	PORTB &= ~(1<<MOTOR_LEFT_IN2);
-	OCR1A = speed; // ì™¼ìª½ PWM ì „ì§„
+	// ¿ŞÂÊ: IN1(E0)=1 | ¿À¸¥ÂÊ: Á¤Áö
+	PORTE = (1<<MOTOR_LEFT_IN1);
+	OCR1A = speed; // ¿ŞÂÊ PWM (ÀüÁø)
+	OCR1B = 0;     // ¿À¸¥ÂÊ PWM (Á¤Áö)
 }
 
 void motor_stop()
 {
-	// ëª¨ë“  IN í•€ 0
-	PORTB &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN1) | (1<<MOTOR_RIGHT_IN2));
-	// ëª¨ë“  PWM 0
+	// ¸ğµç IN ÇÉ(PE0~PE3) 0
+	PORTE &= ~((1<<MOTOR_LEFT_IN1) | (1<<MOTOR_LEFT_IN2) | (1<<MOTOR_RIGHT_IN3) | (1<<MOTOR_RIGHT_IN4));
+	// ¸ğµç PWM 0
 	OCR1A = 0;
 	OCR1B = 0;
 }
@@ -179,40 +188,57 @@ int main(void)
 	timer_init();
 	motor_init();
 	uart_init();
-	sei(); // ì „ì—­ ì¸í„°ëŸ½íŠ¸ í™œì„±í™”
+	sei(); // Àü¿ª ÀÎÅÍ·´Æ® È°¼ºÈ­
+
+	int local_x, local_w;
+	int obj_center;
 
 	while(1)
-	{	
-		// íŒŒì‹±ëœ x, w ê°’ì„ ì‚¬ìš©í•˜ì—¬ ê°ì²´ ì¤‘ì‹¬ ìœ„ì¹˜ ê³„ì‚°
-		int obj_center = x + w/2;
+	{
+		// 16ºñÆ® º¯¼ö ¾ÈÀüÇÏ°Ô ÀĞ±â (Atomic Access)
+		cli(); // ÀÎÅÍ·´Æ® ²ô±â
+		local_x = x;
+		local_w = w;
+		sei(); // ÀÎÅÍ·´Æ® ÄÑ±â
 
-		// 1. ê°ì²´ê°€ ë„ˆë¬´ ê°€ê¹Œìš¸ ë•Œ (w > stop_w)
-		if(w > stop_w) {
-			motor_backward(low_speed);
-		}
-		// 2. ê°ì²´ê°€ ê°€ê¹Œìš¸ ë•Œ (near_w < w <= stop_w)
-		else if(w > near_w)
+		// °´Ã¼ ¹Ì°¨Áö (w=0) ½Ã Á¤Áö
+		if (local_w == 0)
 		{
-			if(obj_center > cam_center + error_range) // ì˜¤ë¥¸ìª½ìœ¼ë¡œ ì¹˜ìš°ì³ì ¸ ìˆì„ ë•Œ
-			motor_right(low_speed);
-			
-			else if(obj_center < cam_center - error_range) // ì™¼ìª½ìœ¼ë¡œ ì¹˜ìš°ì³ì ¸ ìˆì„ ë•Œ
-			motor_left(low_speed);
-			
-			else // ì¤‘ì•™ì¼ ë•Œ
-			motor_forward(low_speed);
+			motor_stop();
 		}
-		// 3. ê°ì²´ê°€ ë©€ë¦¬ ìˆì„ ë•Œ (w <= near_w)
 		else
 		{
-			if(obj_center > cam_center + error_range)
-			motor_right(high_speed);
-			
-			else if(obj_center < cam_center - error_range)
-			motor_left(high_speed);
-			
+			// ÆÄ½ÌµÈ x, w °ªÀ» »ç¿ëÇÏ¿© °´Ã¼ Áß½É À§Ä¡ °è»ê
+			obj_center = local_x + local_w / 2;
+
+			// 1. °´Ã¼°¡ ³Ê¹« °¡±î¿ï ¶§ (w > stop_w)
+			if(local_w > stop_w) {
+				motor_backward(low_speed);
+			}
+			// 2. °´Ã¼°¡ °¡±î¿ï ¶§ (near_w < w <= stop_w)
+			else if(local_w > near_w)
+			{
+				if(obj_center > cam_center + error_range) // ¿À¸¥ÂÊÀ¸·Î Ä¡¿ìÃÄÁ® ÀÖÀ» ¶§
+				motor_right_turn(low_speed);
+				
+				else if(obj_center < cam_center - error_range) // ¿ŞÂÊÀ¸·Î Ä¡¿ìÃÄÁ® ÀÖÀ» ¶§
+				motor_left_turn(low_speed);
+				
+				else // Áß¾ÓÀÏ ¶§
+				motor_forward(low_speed);
+			}
+			// 3. °´Ã¼°¡ ¸Ö¸® ÀÖÀ» ¶§ (w <= near_w)
 			else
-			motor_forward(high_speed);
+			{
+				if(obj_center > cam_center + error_range)
+				motor_right_turn(high_speed);
+				
+				else if(obj_center < cam_center - error_range)
+				motor_left_turn(high_speed);
+				
+				else
+				motor_forward(high_speed);
+			}
 		}
 
 		_delay_ms(10);
