@@ -10,8 +10,9 @@
 #define MOTOR_RIGHT_IN3 PE2  // IN3 (정방향)
 #define MOTOR_RIGHT_IN4 PE3  // IN4 (역방향)
 
-#define high_speed 500
-#define low_speed  300 // 799
+#define high_speed 650
+#define middle_speed 550 
+#define low_speed  450 // 799
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -29,9 +30,13 @@ volatile int buf_index = 0; // ISR에서 수정되므로 volatile 추가
 #define cam_h 480
 #define cam_center (cam_w/2)
 
-#define error_range 50
-#define stop_w 500 // 640
-#define near_w 400
+#define error_range_near 50
+#define error_range_far 150 
+
+#define back_w 400 // 640
+#define stop_w 360 
+#define near_w 225
+#define far_w 150 
 
 // 함수 선언
 void timer_init(void);
@@ -211,29 +216,50 @@ int main(void)
 			// 파싱된 x, w 값을 사용하여 객체 중심 위치 계산
 			obj_center = local_x + local_w / 2;
 
-			// 1. 객체가 너무 가까울 때 (w > stop_w)
-			if(local_w > stop_w) {
-				motor_backward(low_speed);
+			// 1. 객체가 너무 너무 가까울 때 후진 (w > stop_w)
+			if(local_w > back_w) 
+			{
+				motor_backward(middle_speed);
 			}
+			
+			// 객체가 너무 가까울 때 정지 
+			else if(local_w > stop_w) 
+			{
+				motor_stop;
+			}
+			
 			// 2. 객체가 가까울 때 (near_w < w <= stop_w)
 			else if(local_w > near_w)
 			{
-				if(obj_center > cam_center + error_range) // 오른쪽으로 치우쳐져 있을 때
+				if(obj_center > cam_center + error_range_near) // 오른쪽으로 치우쳐져 있을 때
 				motor_right_turn(low_speed);
 				
-				else if(obj_center < cam_center - error_range) // 왼쪽으로 치우쳐져 있을 때
+				else if(obj_center < cam_center - error_range_near) // 왼쪽으로 치우쳐져 있을 때
 				motor_left_turn(low_speed);
 				
 				else // 중앙일 때
 				motor_forward(low_speed);
 			}
+			
+			else if (local_w > far_w)
+			{
+				if(obj_center > cam_center + error_range_near) // 오른쪽으로 치우쳐져 있을 때
+				motor_right_turn(middle_speed);
+				
+				else if(obj_center < cam_center - error_range_near) // 왼쪽으로 치우쳐져 있을 때
+				motor_left_turn(middle_speed);
+				
+				else // 중앙일 때
+				motor_forward(middle_speed);
+			}
+			
 			// 3. 객체가 멀리 있을 때 (w <= near_w)
 			else
 			{
-				if(obj_center > cam_center + error_range)
+				if(obj_center > cam_center + error_range_far)
 				motor_right_turn(high_speed);
 				
-				else if(obj_center < cam_center - error_range)
+				else if(obj_center < cam_center - error_range_far)
 				motor_left_turn(high_speed);
 				
 				else
