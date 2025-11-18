@@ -22,16 +22,15 @@ if not cap.isOpened():
     print("카메라를 열 수 없습니다.")
     exit()
 
-# --- 트랙바 윈도우 생성 및 초기값 설정 ---
+# --- 트랙바 윈도우 생성 및 초기값 설정 (요청값으로 변경됨) ---
 cv2.namedWindow("HSV Range Tuner") 
 
-# 변수명을 H/S/V_MIN/MAX로 변경했습니다.
-# 초기값은 노란색(H: 26~35)에 가깝게 설정합니다. (빨간색처럼 H가 0을 가로지르지 않음)
-cv2.createTrackbar("H_MIN", "HSV Range Tuner", 26, 179, nothing)   
-cv2.createTrackbar("S_MIN", "HSV Range Tuner", 100, 255, nothing) 
-cv2.createTrackbar("V_MIN", "HSV Range Tuner", 100, 255, nothing) 
-cv2.createTrackbar("H_MAX", "HSV Range Tuner", 35, 179, nothing)  
-cv2.createTrackbar("S_MAX", "HSV Range Tuner", 255, 255, nothing) 
+# 초기값을 이미지에서 요청하신 값으로 설정합니다.
+cv2.createTrackbar("H_MIN", "HSV Range Tuner", 37, 179, nothing)   # 37로 변경
+cv2.createTrackbar("S_MIN", "HSV Range Tuner", 93, 255, nothing)  # 93으로 변경
+cv2.createTrackbar("V_MIN", "HSV Range Tuner", 97, 255, nothing)  # 97로 변경
+cv2.createTrackbar("H_MAX", "HSV Range Tuner", 11, 179, nothing)   # 11로 변경
+cv2.createTrackbar("S_MAX", "HSV Range Tuner", 237, 255, nothing)  # 237로 변경
 cv2.createTrackbar("V_MAX", "HSV Range Tuner", 255, 255, nothing) 
 
 # H_LOW_2와 H_UP_2 트랙바는 제거되었습니다.
@@ -69,14 +68,14 @@ while True:
         mask = cv2.inRange(hsv, lower, upper)
     else:
         # 2. 빨간색 감지 (H_MIN > H_MAX) - Hue 0을 가로지르는 경우
-        # 예: 빨간색 (H_MIN=170, H_MAX=10)
+        # 예: 현재 요청값 H_MIN=37, H_MAX=11
         
-        # H_MIN (170)부터 179까지의 범위
+        # H_MIN (37)부터 179까지의 범위
         lower_red_1 = np.array([h_min, s_min, v_min])
         upper_red_1 = np.array([179, s_max, v_max])
         mask1 = cv2.inRange(hsv, lower_red_1, upper_red_1)
         
-        # 0부터 H_MAX (10)까지의 범위
+        # 0부터 H_MAX (11)까지의 범위
         lower_red_2 = np.array([0, s_min, v_min])
         upper_red_2 = np.array([h_max, s_max, v_max])
         mask2 = cv2.inRange(hsv, lower_red_2, upper_red_2)
@@ -119,7 +118,7 @@ while True:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
             data_to_send = f"{x},{y},{w},{h}\n"
-            print(f"객체 감지 성공: [좌표] x:{x}, y:{y} / [크기] 폭:{w}, 높이:{h}")
+            print(f"객체 감지 성공: [좌표] x:{x}, y:{y} / [크기] 폭:{w}, 높:{h}")
 
 
     # 시리얼 통신
